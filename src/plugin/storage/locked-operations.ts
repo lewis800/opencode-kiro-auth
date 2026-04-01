@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import { existsSync, promises as fs } from 'node:fs'
-import lockfile from 'proper-lockfile'
+import * as lockfile from 'proper-lockfile'
 import { isPermanentError } from '../health'
 import type { ManagedAccount } from '../types'
 
@@ -16,8 +16,6 @@ const LOCK_OPTIONS = {
 }
 
 export async function withDatabaseLock<T>(dbPath: string, fn: () => Promise<T>): Promise<T> {
-  const lockPath = `${dbPath}.lock`
-
   if (!existsSync(dbPath)) {
     const dir = dbPath.substring(0, dbPath.lastIndexOf('/'))
     await fs.mkdir(dir, { recursive: true })

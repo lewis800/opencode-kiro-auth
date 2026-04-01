@@ -5,3 +5,9 @@ dist/
 *.tsbuildinfo
 .vscode/*
 .sisyphus
+/.opencode/.gitignore
+/.opencode/bun.lock
+/.opencode/kiro.json
+/.opencode/node_modules/
+/.opencode/opencode.json
+/.opencode/package.json

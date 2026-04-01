@@ -14,6 +14,49 @@ import {
 } from './kiro-cli-parser'
 import { readActiveProfileArnFromKiroCli } from './kiro-cli-profile'
 
+async function migrateProfilelessIdcAccounts(activeProfileArn: string): Promise<void> {
+  const serviceRegion = extractRegionFromArn(activeProfileArn)
+  if (!serviceRegion) return
+
+  const accounts = kiroDb.getAccounts().filter((a) => a.auth_method === 'idc' && !a.profile_arn)
+
+  for (const row of accounts) {
+    const migratedId = createDeterministicAccountId(
+      row.email,
+      'idc',
+      row.client_id || undefined,
+      activeProfileArn
+    )
+
+    await kiroDb.upsertAccount({
+      id: migratedId,
+      email: row.email,
+      authMethod: 'idc',
+      region: serviceRegion,
+      oidcRegion: row.oidc_region || row.region,
+      clientId: row.client_id || undefined,
+      clientSecret: row.client_secret || undefined,
+      profileArn: activeProfileArn,
+      startUrl: row.start_url || undefined,
+      refreshToken: row.refresh_token,
+      accessToken: row.access_token,
+      expiresAt: row.expires_at,
+      rateLimitResetTime: row.rate_limit_reset || 0,
+      isHealthy: row.is_healthy === 1,
+      unhealthyReason: row.unhealthy_reason || undefined,
+      recoveryTime: row.recovery_time || undefined,
+      failCount: row.fail_count || 0,
+      usedCount: row.used_count || 0,
+      limitCount: row.limit_count || 0,
+      lastSync: Date.now()
+    })
+
+    if (row.id !== migratedId) {
+      await kiroDb.deleteAccount(row.id)
+    }
+  }
+}
+
 export async function syncFromKiroCli() {
   const dbPath = getCliDbPath()
   if (!existsSync(dbPath)) return
@@ -31,6 +74,10 @@ export async function syncFromKiroCli() {
       if (typeof arn === 'string' && arn.trim()) activeProfileArn = arn.trim()
     } catch {
       // Ignore state read failures; token import can proceed.
+    }
+
+    if (!activeProfileArn) {
+      activeProfileArn = readActiveProfileArnFromKiroCli()
     }
 
     const deviceRegRow = rows.find(
@@ -195,8 +242,24 @@ export async function syncFromKiroCli() {
           limitCount,
           lastSync: Date.now()
         })
+
+        if (profileArn && authMethod === 'idc' && clientId) {
+          const staleProfilelessAccounts = all.filter(
+            (a) =>
+              a.auth_method === 'idc' && a.client_id === clientId && !a.profile_arn && a.id !== id
+          )
+
+          for (const stale of staleProfilelessAccounts) {
+            await kiroDb.deleteAccount(stale.id)
+          }
+        }
       }
     }
+
+    if (activeProfileArn) {
+      await migrateProfilelessIdcAccounts(activeProfileArn)
+    }
+
     cliDb.close()
   } catch (e) {
     logger.error('Sync failed', e)
